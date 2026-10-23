@@ -14,6 +14,10 @@ router = APIRouter()
 
 @router.get("/api/metrics")
 def get_metrics(ticker: str = Query(..., description="Stock ticker symbol")):
+    # Fast path: Serve from memory cache if available
+    if ticker in DATA_CACHE and "metrics" in DATA_CACHE[ticker]:
+        return DATA_CACHE[ticker]["metrics"]
+
     db = SessionLocal()
 
     try:
@@ -207,6 +211,13 @@ def get_history(
 
     period = period_map[timeframe]
     interval = "15m" if timeframe in ["1D", "5D"] else "1d"
+
+    # Fast path: Serve default 6M from memory cache if available
+    if timeframe == "6M" and ticker in DATA_CACHE and "history" in DATA_CACHE[ticker]:
+        return {
+            "history": DATA_CACHE[ticker]["history"],
+            "dates": DATA_CACHE[ticker]["dates"]
+        }
 
     # Intraday prices are not stored in the daily-price table.
     if interval != "1d":

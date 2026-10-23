@@ -152,11 +152,18 @@ def update_cache():
         except Exception as e:
             print(f"Error updating cache for {ticker}: {e}")
 
+import threading
+
 scheduler.add_job(update_cache, 'interval', minutes=2)
-print("Pre-fetching all tickers at startup...")
-update_cache()
-print("Pre-fetch complete.")
 scheduler.start()
+
+# Pre-fetch all tickers in a non-blocking background thread
+def _background_initial_prefetch():
+    print("Pre-fetching tickers in background...")
+    update_cache()
+    print("Background pre-fetch complete.")
+
+threading.Thread(target=_background_initial_prefetch, daemon=True).start()
 
 # Include routers
 app.include_router(metrics_router)
@@ -389,6 +396,27 @@ class PredictRequest(BaseModel):
 def predict_prices(req: PredictRequest):
     ticker = req.ticker
     days = min(max(req.days, 1), 30)
+
+    # Fast path: use in-memory history if already cached
+    if ticker in DATA_CACHE and "history" in DATA_CACHE[ticker] and len(DATA_CACHE[ticker]["history"]) >= 30:
+        close_prices = pd.Series(DATA_CACHE[ticker]["history"], dtype=float)
+        try:
+            sample = close_prices.tail(60) if len(close_prices) > 60 else close_prices
+            model = ARIMA(sample, order=(2, 1, 0))
+            model_fit = model.fit()
+            forecast = model_fit.forecast(steps=days)
+            return {
+                "prediction": [float(value) for value in forecast.tolist()],
+                "method": "ARIMA"
+            }
+        except Exception:
+            recent_prices = close_prices.tail(10).tolist()
+            avg_change = float(np.mean(np.diff(recent_prices)))
+            last_price = float(recent_prices[-1])
+            return {
+                "prediction": [last_price + avg_change * (i + 1) for i in range(days)],
+                "method": "Moving Average"
+            }
 
     db = SessionLocal()
 

@@ -131,31 +131,45 @@ const Dashboard = () => {
     try {
       setAssetError(null);
       setAssetLoading(true);
-      setMetrics({});
-      setHistory({ history: [], dates: [] });
-      setPredictions({ prediction: [], method: '' });
       
-      const [metricsData, historyData, predictionsData] = await Promise.all([
+      // Fetch metrics, history, and predictions concurrently and resiliently
+      const results = await Promise.allSettled([
         apiService.getMetrics(ticker),
         apiService.getHistory(ticker, timeFrame),
         apiService.getPredictions(ticker, 7)
       ]);
-      console.log(`Loaded history data for ${ticker} with timeFrame: ${timeFrame}`);
-      // Check for errors in any response
-      if (metricsData.error) throw metricsData;
-      if (historyData.error) throw historyData;
-      if (predictionsData.error) throw predictionsData;
-      setMetrics(metricsData);
-      setHistory(historyData);
-      setPredictions(predictionsData);
+      
+      const metricsRes = results[0].status === 'fulfilled' ? results[0].value : null;
+      const historyRes = results[1].status === 'fulfilled' ? results[1].value : null;
+      const predictionsRes = results[2].status === 'fulfilled' ? results[2].value : null;
+      
+      // Check if both core data sources failed
+      if ((!metricsRes || metricsRes.error) && (!historyRes || historyRes.error)) {
+        const errorMsg = (metricsRes && metricsRes.error && metricsRes.error.message) || 
+                         (historyRes && historyRes.error && historyRes.error.message) || 
+                         'Failed to load asset data.';
+        throw new Error(errorMsg);
+      }
+      
+      if (metricsRes && !metricsRes.error) {
+        setMetrics(metricsRes);
+      }
+      if (historyRes && !historyRes.error) {
+        setHistory(historyRes);
+      }
+      if (predictionsRes && !predictionsRes.error) {
+        setPredictions(predictionsRes);
+      } else {
+        setPredictions({ prediction: [], method: '' });
+      }
       
       // If comparison is active, reload comparison data
       if (isComparing) {
         loadComparisonData();
       }
     } catch (err) {
+      console.error('Error loading asset data:', err);
       setAssetError(err);
-      // Do not update metrics/history/predictions if error
     } finally {
       setAssetLoading(false);
     }
