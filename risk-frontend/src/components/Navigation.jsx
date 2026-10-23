@@ -1,10 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BarChart3, TrendingUp, Activity, Layers } from 'lucide-react';
+import { BarChart3, TrendingUp, Activity, Layers, User, LogOut, LogIn, Star } from 'lucide-react';
 import Settings from './Settings';
+import { useAuth } from '../context/AuthContext';
 
 const Navigation = () => {
   const location = useLocation();
+  const { user, isAuthenticated, logout, openAuthModal } = useAuth();
   const navLinks = [
     { to: '/', label: 'Dashboard', icon: BarChart3 },
     { to: '/portfolio', label: 'Portfolio', icon: Layers },
@@ -19,7 +21,7 @@ const Navigation = () => {
             <div className="flex-shrink-0 flex items-center">
               <BarChart3 className="w-8 h-8 text-primary-600 dark:text-primary-400" />
               <span className="ml-2 text-xl font-bold text-gray-900 dark:text-white">
-                Risk Dashboard
+                FinSight
               </span>
             </div>
           </div>
@@ -38,8 +40,35 @@ const Navigation = () => {
                 {label}
               </Link>
             ))}
-            <div className="ml-4">
+            <div className="ml-2">
               <Settings />
+            </div>
+
+            {/* User Auth Section */}
+            <div className="ml-3 pl-3 border-l border-gray-200 dark:border-gray-700 flex items-center space-x-2">
+              {isAuthenticated ? (
+                <div className="flex items-center space-x-2">
+                  <div className="flex items-center px-3 py-1.5 rounded-lg bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800 text-xs text-blue-900 dark:text-blue-300">
+                    <User className="w-3.5 h-3.5 mr-1.5 text-blue-600 dark:text-blue-400" />
+                    <span className="font-semibold">{user?.username}</span>
+                  </div>
+                  <button
+                    onClick={logout}
+                    title="Sign Out"
+                    className="p-1.5 rounded-lg text-gray-500 hover:text-red-500 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                  >
+                    <LogOut className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => openAuthModal('login')}
+                  className="flex items-center px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-sm transition-all"
+                >
+                  <LogIn className="w-3.5 h-3.5 mr-1" />
+                  Sign In
+                </button>
+              )}
             </div>
           </div>
         </div>

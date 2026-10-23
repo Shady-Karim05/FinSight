@@ -11,10 +11,13 @@ import {
   ArrowLeftRight,
   ShieldAlert,
   Download,
-  PlusCircle
+  PlusCircle,
+  Star,
+  Bookmark
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { apiService } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 import { getRiskLevel, formatPercentage, formatCurrency, formatNumber } from '../utils/riskUtils';
 import MetricCard from './MetricCard';
 import PriceChart from './PriceChart';
@@ -22,7 +25,10 @@ import RiskAlerts from './RiskAlerts';
 import { saveAs } from 'file-saver'; // For saving files (optional, can use anchor download)
 
 const Dashboard = () => {
+  const { user, isAuthenticated, openAuthModal, updateWatchlistCount } = useAuth();
   const [selectedAsset, setSelectedAsset] = useState('');
+  const [userWatchlist, setUserWatchlist] = useState([]);
+  const [isTogglingStar, setIsTogglingStar] = useState(false);
   const [assets, setAssets] = useState([]);
   const [metrics, setMetrics] = useState({});
   const [history, setHistory] = useState({ history: [], dates: [] });
@@ -35,23 +41,69 @@ const Dashboard = () => {
   const [isAddingTicker, setIsAddingTicker] = useState(false);
   const [addTickerFeedback, setAddTickerFeedback] = useState(null);
 
+  const isSelectedInWatchlist = userWatchlist.includes(selectedAsset);
+
+  const handleToggleWatchlist = async () => {
+    if (!isAuthenticated) {
+      openAuthModal('login');
+      return;
+    }
+    if (!selectedAsset) return;
+
+    try {
+      setIsTogglingStar(true);
+      if (isSelectedInWatchlist) {
+        await apiService.removeFromUserWatchlist(selectedAsset);
+        const updated = userWatchlist.filter(t => t !== selectedAsset);
+        setUserWatchlist(updated);
+        updateWatchlistCount(-1);
+      } else {
+        await apiService.addToUserWatchlist(selectedAsset);
+        const updated = [...userWatchlist, selectedAsset];
+        setUserWatchlist(updated);
+        updateWatchlistCount(1);
+      }
+    } catch (err) {
+      console.error('Error toggling watchlist:', err);
+    } finally {
+      setIsTogglingStar(false);
+    }
+  };
+
   const handleAddTicker = async () => {
     const raw = newTickerInput.trim().toUpperCase();
     if (!raw) return;
     try {
       setIsAddingTicker(true);
       setAddTickerFeedback(null);
-      const res = await apiService.addAsset(raw);
-      if (res.error) {
-        setAddTickerFeedback({ type: 'error', message: res.error.message || 'Failed to add ticker.' });
-      } else {
-        setAddTickerFeedback({ type: 'success', message: res.message || `${res.ticker} added successfully!` });
-        if (!assets.includes(res.ticker)) {
-          setAssets(prev => [...prev, res.ticker]);
+
+      if (isAuthenticated) {
+        const res = await apiService.addToUserWatchlist(raw);
+        setAddTickerFeedback({ type: 'success', message: res.message || `${res.ticker} added to your personal watchlist!` });
+        const ticker = res.ticker || raw;
+        if (!assets.includes(ticker)) {
+          setAssets(prev => [ticker, ...prev]);
         }
-        setSelectedAsset(res.ticker);
+        if (!userWatchlist.includes(ticker)) {
+          setUserWatchlist(prev => [ticker, ...prev]);
+        }
+        updateWatchlistCount(1);
+        setSelectedAsset(ticker);
         setNewTickerInput('');
-        loadAssetData(res.ticker);
+        loadAssetData(ticker);
+      } else {
+        const res = await apiService.addAsset(raw);
+        if (res.error) {
+          setAddTickerFeedback({ type: 'error', message: res.error.message || 'Failed to add ticker.' });
+        } else {
+          setAddTickerFeedback({ type: 'success', message: res.message || `${res.ticker} added successfully!` });
+          if (!assets.includes(res.ticker)) {
+            setAssets(prev => [...prev, res.ticker]);
+          }
+          setSelectedAsset(res.ticker);
+          setNewTickerInput('');
+          loadAssetData(res.ticker);
+        }
       }
     } catch (err) {
       setAddTickerFeedback({ type: 'error', message: err.message || 'Error communicating with server.' });
@@ -70,7 +122,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     loadDashboardData();
-  }, []);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     if (selectedAsset && selectedAsset !== '') {
@@ -96,16 +148,42 @@ const Dashboard = () => {
     try {
       setLoading(true);
       setDashboardError(null);
-      const [assetsData, alertsData] = await Promise.all([
-        apiService.getAssets(),
-        apiService.getRiskAlerts(riskAlertThreshold)
-      ]);
+
+      let assetsData = [];
+      let alertsData = { high_risk: [] };
+
+      if (isAuthenticated) {
+        try {
+          const [watchlistRes, alertsRes] = await Promise.all([
+            apiService.getUserWatchlist(),
+            apiService.getRiskAlerts(riskAlertThreshold)
+          ]);
+          assetsData = watchlistRes.tickers || [];
+          setUserWatchlist(watchlistRes.tickers || []);
+          alertsData = alertsRes;
+        } catch (authErr) {
+          console.warn('Could not load user watchlist, falling back to public assets:', authErr);
+          const [publicAssets, alertsRes] = await Promise.all([
+            apiService.getAssets(),
+            apiService.getRiskAlerts(riskAlertThreshold)
+          ]);
+          assetsData = publicAssets;
+          alertsData = alertsRes;
+        }
+      } else {
+        const [publicAssets, alertsRes] = await Promise.all([
+          apiService.getAssets(),
+          apiService.getRiskAlerts(riskAlertThreshold)
+        ]);
+        assetsData = publicAssets;
+        alertsData = alertsRes;
+      }
       
       setAssets(assetsData);
       setRiskAlerts(alertsData.high_risk || []);
       
       // Load data for first asset only if we have assets and no asset is currently selected
-      if (assetsData.length > 0 && !selectedAsset) {
+      if (assetsData.length > 0 && (!selectedAsset || !assetsData.includes(selectedAsset))) {
         setSelectedAsset(assetsData[0]);
       }
     } catch (err) {
@@ -398,21 +476,57 @@ const Dashboard = () => {
         {/* Asset Selector & Dynamic Stock Addition */}
         <div className="mb-6">
           <div className="flex flex-col sm:flex-row sm:items-end gap-4">
-            <div className="w-full sm:w-64">
-              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1.5">
-                Select Active Watchlist Asset
-              </label>
-              <select
-                value={selectedAsset}
-                onChange={(e) => handleAssetChange(e.target.value)}
-                className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
-              >
-                {assets.map((asset) => (
-                  <option key={asset} value={asset}>
-                    {asset}
-                  </option>
-                ))}
-              </select>
+            <div className="w-full sm:w-72">
+              <div className="flex items-center justify-between mb-1.5">
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  {isAuthenticated ? 'My Watchlist' : 'Select Stock'}
+                </label>
+                {isAuthenticated ? (
+                  <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-900/60 text-blue-700 dark:text-blue-300">
+                    {assets.length} Stocks
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => openAuthModal('login')}
+                    className="text-xs font-medium text-blue-600 dark:text-blue-400 hover:underline"
+                  >
+                    Sign in to save
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <select
+                  value={selectedAsset}
+                  onChange={(e) => handleAssetChange(e.target.value)}
+                  className="block w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-primary-500 focus:border-primary-500 bg-white dark:bg-gray-700 text-gray-900 dark:text-white"
+                >
+                  {assets.map((asset) => (
+                    <option key={asset} value={asset}>
+                      {asset}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleToggleWatchlist}
+                  disabled={isTogglingStar || !selectedAsset}
+                  title={
+                    !isAuthenticated
+                      ? "Sign In to save to your personal watchlist"
+                      : isSelectedInWatchlist
+                        ? "Remove from your personal watchlist"
+                        : "Add to your personal watchlist"
+                  }
+                  className={`p-2.5 rounded-md border flex items-center justify-center transition-all ${
+                    isSelectedInWatchlist
+                      ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-300 dark:border-amber-700 text-amber-500 shadow-sm'
+                      : 'bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-400 hover:text-amber-500 hover:border-amber-300'
+                  }`}
+                >
+                  <Star className={`w-5 h-5 ${isSelectedInWatchlist ? 'fill-amber-400 text-amber-400' : ''}`} />
+                </button>
+              </div>
             </div>
 
             <div className="flex-1 max-w-md">

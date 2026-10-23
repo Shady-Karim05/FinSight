@@ -16,8 +16,12 @@ from utils.cache import DATA_CACHE, scheduler
 from routes.metrics import router as metrics_router
 from routes.portfolio import router as portfolio_router
 from routes.sentiment import router as sentiment_router
+from routes.auth import router as auth_router
+from routes.user_watchlist import router as watchlist_router
 from database import Base, SessionLocal, engine
 from models.stock_price import StockPrice
+from models.user import User
+from models.watchlist import UserWatchlist
 from datetime import date
 
 load_dotenv()
@@ -169,6 +173,8 @@ threading.Thread(target=_background_initial_prefetch, daemon=True).start()
 app.include_router(metrics_router)
 app.include_router(portfolio_router)
 app.include_router(sentiment_router)
+app.include_router(auth_router)
+app.include_router(watchlist_router)
 
 @app.get("/api/assets")
 def get_assets() -> List[str]:

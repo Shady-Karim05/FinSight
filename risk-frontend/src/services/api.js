@@ -8,6 +8,15 @@ const api = axios.create({
   timeout: 35000,
 });
 
+// Attach JWT token automatically to all outgoing requests if logged in
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('finsight_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
 // API service functions
 export const apiService = {
   // Get available assets/tickers
@@ -149,6 +158,67 @@ export const apiService = {
     } catch (error) {
       console.error('Error testing connection:', error);
       throw error;
+    }
+  },
+
+  // --- Auth Service Methods ---
+  register: async (email, username, password) => {
+    try {
+      const response = await api.post('/api/auth/register', { email, username, password });
+      return response.data;
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || 'Registration failed';
+      throw new Error(msg);
+    }
+  },
+
+  login: async (username_or_email, password) => {
+    try {
+      const response = await api.post('/api/auth/login', { username_or_email, password });
+      return response.data;
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || 'Login failed';
+      throw new Error(msg);
+    }
+  },
+
+  getMe: async () => {
+    try {
+      const response = await api.get('/api/auth/me');
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
+  },
+
+  // --- User Watchlist Methods ---
+  getUserWatchlist: async () => {
+    try {
+      const response = await api.get('/api/user/watchlist');
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching user watchlist:', error);
+      throw error;
+    }
+  },
+
+  addToUserWatchlist: async (ticker) => {
+    try {
+      const response = await api.post('/api/user/watchlist', { ticker });
+      return response.data;
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to add to watchlist';
+      throw new Error(msg);
+    }
+  },
+
+  removeFromUserWatchlist: async (ticker) => {
+    try {
+      const response = await api.delete(`/api/user/watchlist/${encodeURIComponent(ticker)}`);
+      return response.data;
+    } catch (error) {
+      const msg = error.response?.data?.detail || error.message || 'Failed to remove from watchlist';
+      throw new Error(msg);
     }
   }
 };
