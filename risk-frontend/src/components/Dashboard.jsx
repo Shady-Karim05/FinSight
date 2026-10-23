@@ -18,10 +18,9 @@ import {
 import { Link } from 'react-router-dom';
 import { apiService } from '../services/api';
 import { useAuth } from '../context/AuthContext';
-import { getRiskLevel, formatPercentage, formatCurrency, formatNumber } from '../utils/riskUtils';
+import { formatPercentage, formatCurrency, formatNumber } from '../utils/riskUtils';
 import MetricCard from './MetricCard';
 import PriceChart from './PriceChart';
-import RiskAlerts from './RiskAlerts';
 import { saveAs } from 'file-saver'; // For saving files (optional, can use anchor download)
 
 const Dashboard = () => {
@@ -33,10 +32,8 @@ const Dashboard = () => {
   const [metrics, setMetrics] = useState({});
   const [history, setHistory] = useState({ history: [], dates: [] });
   const [predictions, setPredictions] = useState({ prediction: [], method: '' });
-  const [riskAlerts, setRiskAlerts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [riskAlertThreshold, setRiskAlertThreshold] = useState(0.05);
   const [newTickerInput, setNewTickerInput] = useState('');
   const [isAddingTicker, setIsAddingTicker] = useState(false);
   const [addTickerFeedback, setAddTickerFeedback] = useState(null);
@@ -116,7 +113,6 @@ const Dashboard = () => {
   const [comparisonData, setComparisonData] = useState(null);
   const [comparisonTimeFrame, setComparisonTimeFrame] = useState('1Y'); // Default comparison timeframe
   const [assetError, setAssetError] = useState(null);
-  const [riskAlertError, setRiskAlertError] = useState(null);
   const [assetLoading, setAssetLoading] = useState(false);
   const [timeFrame, setTimeFrame] = useState('6M'); // Default time frame
 
@@ -130,11 +126,6 @@ const Dashboard = () => {
       loadAssetData(selectedAsset);
     }
   }, [selectedAsset]);
-
-  // Fetch risk alerts when threshold changes
-  useEffect(() => {
-    fetchRiskAlerts(riskAlertThreshold);
-  }, [riskAlertThreshold]);
   
   // Load comparison data when parameters change
   useEffect(() => {
@@ -150,37 +141,23 @@ const Dashboard = () => {
       setDashboardError(null);
 
       let assetsData = [];
-      let alertsData = { high_risk: [] };
 
       if (isAuthenticated) {
         try {
-          const [watchlistRes, alertsRes] = await Promise.all([
-            apiService.getUserWatchlist(),
-            apiService.getRiskAlerts(riskAlertThreshold)
-          ]);
+          const watchlistRes = await apiService.getUserWatchlist();
           assetsData = watchlistRes.tickers || [];
           setUserWatchlist(watchlistRes.tickers || []);
-          alertsData = alertsRes;
         } catch (authErr) {
           console.warn('Could not load user watchlist, falling back to public assets:', authErr);
-          const [publicAssets, alertsRes] = await Promise.all([
-            apiService.getAssets(),
-            apiService.getRiskAlerts(riskAlertThreshold)
-          ]);
+          const publicAssets = await apiService.getAssets();
           assetsData = publicAssets;
-          alertsData = alertsRes;
         }
       } else {
-        const [publicAssets, alertsRes] = await Promise.all([
-          apiService.getAssets(),
-          apiService.getRiskAlerts(riskAlertThreshold)
-        ]);
+        const publicAssets = await apiService.getAssets();
         assetsData = publicAssets;
-        alertsData = alertsRes;
       }
       
       setAssets(assetsData);
-      setRiskAlerts(alertsData.high_risk || []);
       
       // Load data for first asset only if we have assets and no asset is currently selected
       if (assetsData.length > 0 && (!selectedAsset || !assetsData.includes(selectedAsset))) {
@@ -191,17 +168,6 @@ const Dashboard = () => {
       console.error(err);
     } finally {
       setLoading(false);
-    }
-  };
-
-  const fetchRiskAlerts = async (threshold) => {
-    try {
-      setRiskAlertError(null);
-      const alertsData = await apiService.getRiskAlerts(threshold);
-      setRiskAlerts(alertsData.high_risk || []);
-    } catch (err) {
-      setRiskAlertError({ error: { message: 'Failed to fetch risk alerts.', suggestion: 'Try again later.' } });
-      console.error(err);
     }
   };
 
@@ -320,9 +286,6 @@ const Dashboard = () => {
     }
   };
 
-  const handleAlertClick = (asset) => {
-    setSelectedAsset(asset);
-  };
 
   // Utility function to convert metrics & historical prices to CSV and trigger download
   const exportMetricsToCSV = () => {
@@ -433,7 +396,6 @@ const Dashboard = () => {
     }
   }
 
-  const riskLevel = getRiskLevel(metrics.volatility || 0);
   const chartData = history.history && history.dates ? 
     history.history.map((price, index) => ({
       date: history.dates[index],
@@ -454,23 +416,6 @@ const Dashboard = () => {
             <Link to="/portfolio" className="btn-secondary flex items-center dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><Layers className="w-4 h-4 mr-1" /> Portfolio Analysis</Link>
             <Link to="/sentiment" className="btn-secondary flex items-center dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"><Activity className="w-4 h-4 mr-1" /> Sentiment Analysis</Link>
           </div>
-        </div>
-
-        {/* Risk Alert Threshold Slider */}
-        <div className="mb-6 flex flex-col md:flex-row md:items-center gap-4">
-          <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2 md:mb-0">
-            Risk Alert Threshold (Volatility):
-          </label>
-          <input
-            type="range"
-            min={0.01}
-            max={0.2}
-            step={0.005}
-            value={riskAlertThreshold}
-            onChange={e => setRiskAlertThreshold(Number(e.target.value))}
-            className="w-full md:w-64 accent-primary-600"
-          />
-          <span className="ml-2 text-sm text-gray-700 dark:text-gray-300">{(riskAlertThreshold * 100).toFixed(1)}%</span>
         </div>
 
         {/* Asset Selector & Dynamic Stock Addition */}
@@ -567,152 +512,86 @@ const Dashboard = () => {
           )}
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
+        <div className="mb-8">
           {/* Risk Metrics */}
-          <div className="lg:col-span-2">
-            {/* Export Button */}
-            <div className="flex justify-end mb-2">
-              <button
-                className="btn-primary px-4 py-2 rounded shadow dark:bg-primary-600 dark:hover:bg-primary-700 flex items-center gap-1.5 text-sm"
-                onClick={exportMetricsToCSV}
-                title="Download full risk report with metrics and historical prices"
-              >
-                <Download className="w-4 h-4" />
-                Export Risk Report (.CSV)
-              </button>
-            </div>
-            {/* Fix: Always render advanced metrics and below, only replace the metrics grid with error if needed */}
-            <>
-              {assetErrorMessage ? (
-                <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-4 rounded mb-4">
-                  <div className="font-semibold">{assetErrorMessage}</div>
-                  {assetErrorSuggestion && <div className="text-sm">Suggestion: {assetErrorSuggestion}</div>}
-                  <button onClick={() => loadAssetData(selectedAsset)} className="btn-primary mt-2">Retry</button>
-                </div>
-              ) : assetLoading ? (
-                // Loading state for metrics
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow animate-pulse">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-5 h-5 bg-gray-300 dark:bg-gray-600 rounded"></div>
-                          <div>
-                            <div className="h-4 bg-gray-300 dark:bg-gray-600 rounded w-20 mb-2"></div>
-                            <div className="h-6 bg-gray-300 dark:bg-gray-600 rounded w-16"></div>
-                          </div>
+          {/* Export Button */}
+          <div className="flex justify-end mb-2">
+            <button
+              className="btn-primary px-4 py-2 rounded shadow dark:bg-primary-600 dark:hover:bg-primary-700 flex items-center gap-1.5 text-sm"
+              onClick={exportMetricsToCSV}
+              title="Download full risk report with metrics and historical prices"
+            >
+              <Download className="w-4 h-4" />
+              Export Risk Report (.CSV)
+            </button>
+          </div>
+          {/* Fix: Always render advanced metrics and below, only replace the metrics grid with error if needed */}
+          <>
+            {assetErrorMessage ? (
+              <div className="bg-red-100 dark:bg-red-900/20 text-red-700 dark:text-red-300 p-4 rounded mb-4">
+                <div className="font-semibold">{assetErrorMessage}</div>
+                {assetErrorSuggestion && <div className="text-sm">Suggestion: {assetErrorSuggestion}</div>}
+                <button onClick={() => loadAssetData(selectedAsset)} className="btn-primary mt-2">Retry</button>
+              </div>
+            ) : assetLoading ? (
+              // Loading state for metrics
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow animate-pulse">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-5 h-5 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                        <div>
+                          <div className="h-4 bg-gray-300 dark:bg-gray-600 rounded w-20 mb-2"></div>
+                          <div className="h-6 bg-gray-300 dark:bg-gray-600 rounded w-16"></div>
                         </div>
                       </div>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-                  {selectedAsset && Object.keys(metrics).length > 0 ? (
-                    <>
-                      <MetricCard
-                        title="Volatility"
-                        value={metrics.volatility || 0}
-                        format="percentage"
-                        icon={BarChart3}
-                        subtitle="Annualized volatility"
-                      />
-                      <MetricCard
-                        title="VaR (99%)"
-                        value={metrics.VaR_99 || 0}
-                        format="percentage"
-                        icon={AlertTriangle}
-                        subtitle="Value at Risk"
-                      />
-                      <MetricCard
-                        title="Sharpe Ratio"
-                        value={metrics.sharpe_ratio || 0}
-                        format="number"
-                        icon={Target}
-                        subtitle="Risk-adjusted return"
-                      />
-                      <MetricCard
-                        title="Max Drawdown"
-                        value={metrics.max_drawdown || 0}
-                        format="percentage"
-                        icon={TrendingDown}
-                        subtitle="Maximum decline"
-                      />
-                    </>
-                  ) : (
-                    // Empty state for metrics
-                    Array.from({ length: 4 }).map((_, index) => (
-                      <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center space-x-3">
-                            <div className="w-5 h-5 bg-gray-200 dark:bg-gray-700 rounded"></div>
-                            <div>
-                              <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-20 mb-2"></div>
-                              <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-16"></div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              )}
-              {/* Advanced Risk Metrics */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
-                {assetLoading ? (
-                  Array.from({ length: 4 }).map((_, index) => (
-                    <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow animate-pulse">
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center space-x-3">
-                          <div className="w-5 h-5 bg-gray-300 dark:bg-gray-600 rounded"></div>
-                          <div>
-                            <div className="h-4 bg-gray-300 dark:bg-gray-600 rounded w-24 mb-2"></div>
-                            <div className="h-6 bg-gray-300 dark:bg-gray-600 rounded w-16"></div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))
-                ) : selectedAsset && Object.keys(metrics).length > 0 ? (
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                {selectedAsset && Object.keys(metrics).length > 0 ? (
                   <>
                     <MetricCard
-                      title="CVaR (99%)"
-                      value={metrics.CVaR_99 || 0}
+                      title="Volatility"
+                      value={metrics.volatility || 0}
                       format="percentage"
-                      icon={ShieldAlert}
-                      subtitle="Expected Shortfall (tail risk)"
-                    />
-                    <MetricCard
-                      title="Sortino Ratio"
-                      value={metrics.sortino_ratio || 0}
-                      format="number"
-                      icon={TrendingUp}
-                      subtitle="Downside risk-adjusted return"
-                    />
-                    <MetricCard
-                      title="Calmar Ratio"
-                      value={metrics.calmar_ratio || 0}
-                      format="number"
                       icon={BarChart3}
-                      subtitle="Return vs. drawdown"
+                      subtitle="Annualized volatility"
                     />
                     <MetricCard
-                      title="Max Consecutive Losses"
-                      value={metrics.max_consecutive_losses || 0}
-                      format="number"
+                      title="VaR (99%)"
+                      value={metrics.VaR_99 || 0}
+                      format="percentage"
                       icon={AlertTriangle}
-                      subtitle="Longest loss streak"
+                      subtitle="Value at Risk"
+                    />
+                    <MetricCard
+                      title="Sharpe Ratio"
+                      value={metrics.sharpe_ratio || 0}
+                      format="number"
+                      icon={Target}
+                      subtitle="Risk-adjusted return"
+                    />
+                    <MetricCard
+                      title="Max Drawdown"
+                      value={metrics.max_drawdown || 0}
+                      format="percentage"
+                      icon={TrendingDown}
+                      subtitle="Maximum decline"
                     />
                   </>
                 ) : (
-                  // Empty state for advanced metrics
+                  // Empty state for metrics
                   Array.from({ length: 4 }).map((_, index) => (
                     <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-3">
                           <div className="w-5 h-5 bg-gray-200 dark:bg-gray-700 rounded"></div>
                           <div>
-                            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-24 mb-2"></div>
+                            <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-20 mb-2"></div>
                             <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-16"></div>
                           </div>
                         </div>
@@ -721,47 +600,72 @@ const Dashboard = () => {
                   ))
                 )}
               </div>
-            </>
-          </div>
-
-          {/* Risk Level Indicator */}
-          <div className="card">
-            <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-4">Risk Level</h3>
-            <div className="text-center">
-              {selectedAsset && Object.keys(metrics).length > 0 ? (
-                <>
-                  <div className={`w-20 h-20 rounded-full mx-auto mb-4 flex items-center justify-center ${
-                    riskLevel.level === 'low' ? 'bg-green-100' :
-                    riskLevel.level === 'medium' ? 'bg-yellow-100' : 'bg-red-100'
-                  }`}>
-                    {riskLevel.level === 'low' ? (
-                      <TrendingUp className="w-8 h-8 text-green-600" />
-                    ) : riskLevel.level === 'medium' ? (
-                      <BarChart3 className="w-8 h-8 text-yellow-600" />
-                    ) : (
-                      <TrendingDown className="w-8 h-8 text-red-600" />
-                    )}
+            )}
+            {/* Advanced Risk Metrics */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mt-4">
+              {assetLoading ? (
+                Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow animate-pulse">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-5 h-5 bg-gray-300 dark:bg-gray-600 rounded"></div>
+                        <div>
+                          <div className="h-4 bg-gray-300 dark:bg-gray-600 rounded w-24 mb-2"></div>
+                          <div className="h-6 bg-gray-300 dark:bg-gray-600 rounded w-16"></div>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                  <span className={`risk-indicator ${riskLevel.color}`}>
-                    {riskLevel.label}
-                  </span>
-                  <p className="text-sm text-gray-500 mt-2">
-                    Based on volatility analysis
-                  </p>
+                ))
+              ) : selectedAsset && Object.keys(metrics).length > 0 ? (
+                <>
+                  <MetricCard
+                    title="CVaR (99%)"
+                    value={metrics.CVaR_99 || 0}
+                    format="percentage"
+                    icon={ShieldAlert}
+                    subtitle="Expected Shortfall (tail risk)"
+                  />
+                  <MetricCard
+                    title="Sortino Ratio"
+                    value={metrics.sortino_ratio || 0}
+                    format="number"
+                    icon={TrendingUp}
+                    subtitle="Downside risk-adjusted return"
+                  />
+                  <MetricCard
+                    title="Calmar Ratio"
+                    value={metrics.calmar_ratio || 0}
+                    format="number"
+                    icon={BarChart3}
+                    subtitle="Return vs. drawdown"
+                  />
+                  <MetricCard
+                    title="Max Consecutive Losses"
+                    value={metrics.max_consecutive_losses || 0}
+                    format="number"
+                    icon={AlertTriangle}
+                    subtitle="Longest loss streak"
+                  />
                 </>
-              ) : selectedAsset ? (
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400"></div>
-                  <span className="ml-2 text-gray-600 dark:text-gray-400">Analyzing risk...</span>
-                </div>
               ) : (
-                <div className="text-center py-8">
-                  <BarChart3 className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                  <p className="text-gray-600 dark:text-gray-400">Select an asset to view risk level</p>
-                </div>
+                // Empty state for advanced metrics
+                Array.from({ length: 4 }).map((_, index) => (
+                  <div key={index} className="metric-card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center space-x-3">
+                        <div className="w-5 h-5 bg-gray-200 dark:bg-gray-700 rounded"></div>
+                        <div>
+                          <div className="h-4 bg-gray-200 dark:bg-gray-700 rounded w-24 mb-2"></div>
+                          <div className="h-6 bg-gray-200 dark:bg-gray-700 rounded w-16"></div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                ))
               )}
             </div>
-          </div>
+          </>
         </div>
 
         {/* Time Frame and Comparison Controls */}
@@ -805,55 +709,39 @@ const Dashboard = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="w-full">
           {/* Price Chart */}
-          <div className="lg:col-span-2">
-            {assetLoading ? (
-              <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400"></div>
-                  <span className="ml-2 text-gray-600 dark:text-gray-400">Loading chart data...</span>
-                </div>
+          {assetLoading ? (
+            <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400"></div>
+                <span className="ml-2 text-gray-600 dark:text-gray-400">Loading chart data...</span>
               </div>
-            ) : selectedAsset && filteredChartData.length > 0 ? (
-              <PriceChart
-                data={filteredChartData}
-                comparisonData={comparisonData}
-                title={`${selectedAsset} Price History${isComparing ? ` (vs ${comparisonTimeFrame})` : ''}`}
-                height={400}
-                ticker={selectedAsset}
-              />
-            ) : selectedAsset ? (
-              <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                <div className="flex items-center justify-center py-8">
-                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400"></div>
-                  <span className="ml-2 text-gray-600 dark:text-gray-400">Loading chart data...</span>
-                </div>
-              </div>
-            ) : (
-              <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
-                <div className="text-center py-8">
-                  <BarChart3 className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Price Chart</h3>
-                  <p className="text-gray-600 dark:text-gray-400">Select an asset to view price history</p>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Risk Alerts */}
-          <div>
-            {riskAlertError ? (
-              <div className="bg-yellow-100 dark:bg-yellow-900/20 text-yellow-700 dark:text-yellow-300 p-3 rounded mb-2">
-                <div className="font-semibold">{riskAlertError.error?.message || 'Risk alert error.'}</div>
-                {riskAlertError.error?.suggestion && <div className="text-sm">Suggestion: {riskAlertError.error.suggestion}</div>}
-              </div>
-            ) : null}
-            <RiskAlerts
-              alerts={riskAlerts}
-              onAssetClick={handleAlertClick}
+            </div>
+          ) : selectedAsset && filteredChartData.length > 0 ? (
+            <PriceChart
+              data={filteredChartData}
+              comparisonData={comparisonData}
+              title={`${selectedAsset} Price History${isComparing ? ` (vs ${comparisonTimeFrame})` : ''}`}
+              height={400}
+              ticker={selectedAsset}
             />
-          </div>
+          ) : selectedAsset ? (
+            <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <div className="flex items-center justify-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 dark:border-primary-400"></div>
+                <span className="ml-2 text-gray-600 dark:text-gray-400">Loading chart data...</span>
+              </div>
+            </div>
+          ) : (
+            <div className="card bg-white dark:bg-gray-800 p-4 rounded-lg shadow">
+              <div className="text-center py-8">
+                <BarChart3 className="w-12 h-12 text-gray-400 dark:text-gray-500 mx-auto mb-4" />
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-white mb-2">Price Chart</h3>
+                <p className="text-gray-600 dark:text-gray-400">Select an asset to view price history</p>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Predictions Section */}
